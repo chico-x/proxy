@@ -1,63 +1,41 @@
 import express from "express";
-import bodyParser from "body-parser";
-import puter from "puter-js"; // npm install puter-js
+import fetch from "node-fetch";
+import cors from "cors";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 const app = express();
-app.use(bodyParser.json());
+app.use(cors());
+app.use(express.json());
 
-// Load secret API key from environment variables
-const MY_SECRET = process.env.PROXY_KEY;
+const PUTER_API = "https://api.puter.com/v1/chat/completions"; 
+const API_KEY = process.env.PUTER_API_KEY; // stored securely on Render
 
-if (!MY_SECRET) {
-  console.error("❌ ERROR: No PROXY_KEY set in environment variables!");
-  process.exit(1);
-}
-
-// Middleware: check API key
-app.use((req, res, next) => {
-  const key = req.headers["x-api-key"];
-  if (key !== MY_SECRET) {
-    return res.status(403).json({ error: "Forbidden - Invalid API key" });
-  }
-  next();
-});
-
-// OpenAI-compatible endpoint
+// Fake endpoint JanitorAI will call
 app.post("/v1/chat/completions", async (req, res) => {
   try {
-    const { messages, model } = req.body;
-
-    // Convert chat messages to a prompt
-    const prompt = messages.map(m => `${m.role}: ${m.content}`).join("\n");
-
-    // Call Puter.js AI
-    const response = await puter.ai.chat(prompt, {
-      model: model || "deepseek-chat"
+    // Forward JanitorAI's request body to Puter
+    const response = await fetch(PUTER_API, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${API_KEY}`
+      },
+      body: JSON.stringify(req.body)
     });
 
-    // Format response like OpenAI
-    res.json({
-      id: "chatcmpl-" + Date.now(),
-      object: "chat.completion",
-      choices: [
-        {
-          index: 0,
-          message: {
-            role: "assistant",
-            content: response.message.content
-          },
-          finish_reason: "stop"
-        }
-      ]
-    });
+    const data = await response.json();
+
+    // Send it back unchanged (so JanitorAI thinks it's the real API)
+    res.status(response.status).json(data);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: { message: err.message } });
+    res.status(500).json({ error: "Proxy failed" });
   }
 });
 
-// Start server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Proxy running at http://localhost:${PORT}/v1/chat/completions`);
+  console.log(`Fake API listening on port ${PORT}`);
 });
