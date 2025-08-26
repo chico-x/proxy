@@ -1,41 +1,64 @@
 import express from "express";
 import fetch from "node-fetch";
-import cors from "cors";
-import dotenv from "dotenv";
-
-dotenv.config();
 
 const app = express();
-app.use(cors());
 app.use(express.json());
 
-const PUTER_API = "https://api.puter.com/v1/chat/completions"; 
-const API_KEY = process.env.PUTER_API_KEY; // stored securely on Render
+const PORT = process.env.PORT || 10000;
 
-// Fake endpoint JanitorAI will call
+// Fake OpenAI-compatible endpoint
 app.post("/v1/chat/completions", async (req, res) => {
   try {
-    // Forward JanitorAI's request body to Puter
-    const response = await fetch(PUTER_API, {
+    const { messages, model } = req.body;
+
+    // Forward to Puter API
+    const puterRes = await fetch("https://api.puter.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${API_KEY}`
+        "Authorization": `Bearer ${process.env.PUTER_API_KEY}`
       },
-      body: JSON.stringify(req.body)
+      body: JSON.stringify({ messages, model })
     });
 
-    const data = await response.json();
+    const data = await puterRes.json();
 
-    // Send it back unchanged (so JanitorAI thinks it's the real API)
-    res.status(response.status).json(data);
+    // Get Puter’s reply (adjust depending on their response shape)
+    const reply =
+      data.output ||
+      data.choices?.[0]?.message?.content ||
+      "⚠️ Error: no reply from Puter";
+
+    // Wrap in OpenAI-style response
+    const fakeResponse = {
+      id: "chatcmpl-" + Date.now(),
+      object: "chat.completion",
+      created: Math.floor(Date.now() / 1000),
+      model: model || "puter-fake",
+      choices: [
+        {
+          index: 0,
+          message: {
+            role: "assistant",
+            content: reply
+          },
+          finish_reason: "stop"
+        }
+      ],
+      usage: {
+        prompt_tokens: 0,
+        completion_tokens: reply.split(" ").length,
+        total_tokens: reply.split(" ").length
+      }
+    };
+
+    res.json(fakeResponse);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Proxy failed" });
+    console.error("Proxy error:", err);
+    res.status(500).json({ error: "Something went wrong with proxy" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Fake API listening on port ${PORT}`);
 });
