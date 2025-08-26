@@ -1,36 +1,35 @@
 import express from "express";
-import fetch from "node-fetch";
+import Puter from "puter"; // assuming Puter.js SDK
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Fake OpenAI-compatible endpoint
+// Initialize Puter
+const puter = new Puter({ apiKey: process.env.PUTER_API_KEY });
+
 app.post("/v1/chat/completions", async (req, res) => {
   try {
     const { messages, model } = req.body;
 
-    // Forward to Puter API
-    const puterRes = await fetch("https://api.puter.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${process.env.PUTER_API_KEY}`
-      },
-      body: JSON.stringify({ messages, model })
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: "Invalid request: messages missing" });
+    }
+
+    // Convert OpenAI-style messages to Puter messages
+    const userMessage = messages[messages.length - 1].content;
+
+    // Call Puter
+    const puterReply = await puter.chat({
+      model: model || "default",
+      message: userMessage
     });
 
-    const data = await puterRes.json();
+    const reply = puterReply?.output || "⚠️ No reply from Puter";
 
-    // Get Puter’s reply (adjust depending on their response shape)
-    const reply =
-      data.output ||
-      data.choices?.[0]?.message?.content ||
-      "⚠️ Error: no reply from Puter";
-
-    // Wrap in OpenAI-style response
-    const fakeResponse = {
+    // Return OpenAI-compatible response
+    res.json({
       id: "chatcmpl-" + Date.now(),
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
@@ -38,10 +37,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       choices: [
         {
           index: 0,
-          message: {
-            role: "assistant",
-            content: reply
-          },
+          message: { role: "assistant", content: reply },
           finish_reason: "stop"
         }
       ],
@@ -50,15 +46,14 @@ app.post("/v1/chat/completions", async (req, res) => {
         completion_tokens: reply.split(" ").length,
         total_tokens: reply.split(" ").length
       }
-    };
+    });
 
-    res.json(fakeResponse);
   } catch (err) {
     console.error("Proxy error:", err);
-    res.status(500).json({ error: "Something went wrong with proxy" });
+    res.status(500).json({ error: "Something went wrong with Puter" });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Fake API listening on port ${PORT}`);
+  console.log(`Puter OpenAI-style proxy listening on port ${PORT}`);
 });
