@@ -1,15 +1,12 @@
 import express from "express";
-import Puter from "puter";
+import fetch from "node-fetch";
 
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
 
-// Initialize Puter
-const puter = new Puter({ apiKey: process.env.PUTER_API_KEY });
-
-// In-memory conversation store (simple)
+// In-memory conversation store
 const conversations = {};
 
 app.post("/v1/chat/completions", async (req, res) => {
@@ -24,19 +21,28 @@ app.post("/v1/chat/completions", async (req, res) => {
     const sessionKey = session_id || "default";
     if (!conversations[sessionKey]) conversations[sessionKey] = [];
 
-    // Append new messages to session history
-    conversations[sessionKey].push(...messages);
+    // Get the latest message (Puter.js expects just the current message)
+    const lastMessage = messages[messages.length - 1];
+    const userMessage = lastMessage.content;
 
-    // Convert OpenAI-style messages to Puter format
-    const fullConversation = conversations[sessionKey].map(m => m.content).join("\n");
-
-    // Call Puter
-    const puterReply = await puter.chat({
-      model: model || "default",
-      message: fullConversation
+    // Call Puter.js API (this is based on their documentation)
+    const response = await fetch('https://api.puter.com/v2/ai/chat', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: userMessage,
+        model: model || 'gpt-4.1-nano' // Default to their nano model
+      })
     });
 
-    const reply = puterReply?.output || "⚠️ No reply from Puter";
+    if (!response.ok) {
+      throw new Error(`Puter API error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const reply = data.response || "No response from Puter";
 
     // Save assistant reply in conversation history
     conversations[sessionKey].push({ role: "assistant", content: reply });
@@ -46,7 +52,7 @@ app.post("/v1/chat/completions", async (req, res) => {
       id: "chatcmpl-" + Date.now(),
       object: "chat.completion",
       created: Math.floor(Date.now() / 1000),
-      model: model || "puter-fake",
+      model: model || "gpt-4.1-nano",
       choices: [
         {
           index: 0,
@@ -63,7 +69,7 @@ app.post("/v1/chat/completions", async (req, res) => {
 
   } catch (err) {
     console.error("Proxy error:", err);
-    res.status(500).json({ error: "Something went wrong with Puter" });
+    res.status(500).json({ error: "Something went wrong with Puter API" });
   }
 });
 
